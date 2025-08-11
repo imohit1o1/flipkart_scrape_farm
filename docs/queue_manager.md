@@ -1,0 +1,509 @@
+# Queue Manager Documentation
+
+## Overview
+
+The Queue Manager is a priority-based job scheduling system designed for the Flipkart scraping farm. It manages three distinct queues with different priorities and handles automatic download scheduling, retry logic, and resource-aware batch processing.
+
+## Architecture
+
+### Queue Structure
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Manual Queue  │    │   Bulk Queue    │    │   File Queue    │
+│   (High Priority)│    │  (Low Priority) │    │ (Medium Priority)│
+│                 │    │                 │    │                 │
+│ • Single routes │    │ • Bulk ops      │    │ • Downloads     │
+│ • User requests │    │ • Auto-downloads│    │ • Uploads       │
+│ • High priority │    │ • Retries       │    │ • DB updates    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │  Batch Dispatcher│
+                    │                 │
+                    │ • Resource aware │
+                    │ • Priority based │
+                    │ • Cooldown mgmt  │
+                    └─────────────────┘
+```
+
+### Key Features
+
+- **Priority-based Scheduling**: Manual jobs always take precedence over bulk operations
+- **Resource Monitoring**: Integrates with CPU analytics for optimal batch sizing
+- **Auto-download Scheduling**: Automatically schedules downloads after successful requests
+- **Retry Logic**: Exponential backoff with configurable attempts and delays
+- **Cooldown Management**: Prevents rate limiting with domain-based cooldowns
+- **File Operations**: Separate queue for non-blocking file operations
+
+## Installation & Setup
+
+```javascript
+import { createQueueManager } from '../utils/queue_manager.js';
+import { RETRY_CONFIG } from '../constants.js';
+
+const queueManager = createQueueManager({
+  maxBatchSize: 16,
+  retryConfig: RETRY_CONFIG,
+  cooldownMs: 1000,
+  defaultDownloadDelayMs: 15 * 60 * 1000, // 15 minutes
+  resourceThresholds: {
+    maxCPUUsagePercent: 80,
+    maxMemoryUsagePercent: 85,
+    minFreeMemoryMB: 1024
+  },
+  // Event handlers
+  onJobEnqueued: (job) => console.log('Job enqueued:', job.jobId),
+  onJobStarted: (job) => console.log('Job started:', job.jobId),
+  onJobCompleted: (job, result) => console.log('Job completed:', job.jobId),
+  onJobFailed: (job, error) => console.log('Job failed:', job.jobId, error),
+  onDownloadScheduled: (job) => console.log('Download scheduled:', job.jobId),
+  onDrain: (drained) => console.log('Queues drained:', drained)
+});
+```
+
+## Job Structure
+
+### Basic Job
+```javascript
+const job = {
+  jobId: 'unique_job_id',
+  seller_id: 'seller123',
+  identifier: 'user@example.com',
+  reportType: 'gst_report',
+  parameters: {
+    startDate: '2024-01-01',
+    endDate: '2024-01-31'
+  },
+  mode: 'manual', // 'manual' | 'bulk' | 'auto'
+  operation: 'request', // 'request' | 'download'
+  priority: 'high', // 'high' | 'normal'
+  domain: 'flipkart.com' // for cooldown management
+};
+```
+
+### Job with Retry History
+```javascript
+const jobWithRetries = {
+  ...basicJob,
+  attempts: 2,
+  last_attempt_at: new Date('2024-01-15T10:30:00Z'),
+  scheduled_for: new Date('2024-01-15T10:35:00Z'), // retry delay
+  error: 'Previous error message'
+};
+```
+
+## Core APIs
+
+### Enqueue Operations
+
+#### Add Single Job
+```javascript
+try {
+  const enrichedJob = queueManager.addJob({
+    jobId: 'job_123',
+    seller_id: 'seller123',
+    identifier: 'user@example.com',
+    reportType: 'gst_report',
+    parameters: {
+      startDate: '2024-01-01',
+      endDate: '2024-01-31'
+    },
+    mode: 'manual'
+  });
+  console.log('Job added:', enrichedJob.jobId);
+} catch (error) {
+  console.error('Failed to add job:', error.message);
+}
+```
+
+#### Add Multiple Jobs
+```javascript
+const jobs = [
+  { jobId: 'job_1', seller_id: 'seller1', /* ... */ },
+  { jobId: 'job_2', seller_id: 'seller2', /* ... */ }
+];
+
+const results = queueManager.addJobs(jobs);
+results.forEach(result => {
+  if (result.error) {
+    console.error('Job failed:', result.error);
+  } else {
+    console.log('Job added:', result.jobId);
+  }
+});
+```
+
+#### Add File Task
+```javascript
+const fileTask = queueManager.addFileTask({
+  id: 'download_123',
+  type: 'download', // 'download' | 'upload' | 'db_update'
+  data: { fileUrl: 'https://...', targetPath: '/tmp/file.xlsx' },
+  priority: 'high'
+});
+```
+
+### Priority Management
+
+#### Set Job Priority
+```javascript
+queueManager.setPriority('job_123', 'high');
+```
+
+#### Bump Job to Front
+```javascript
+queueManager.bumpJob('job_123'); // Moves to front of manual queue
+```
+
+### Batch Processing
+
+#### Get Next Batch
+```javascript
+const batch = await queueManager.getNextBatch();
+console.log(`Got batch of ${batch.length} jobs`);
+
+// Reserve batch to prevent duplicate processing
+queueManager.reserveBatch(batch);
+
+// Process jobs...
+for (const job of batch) {
+  try {
+    const result = await processJob(job);
+    queueManager.markJobCompleted(job.jobId, result);
+  } catch (error) {
+    queueManager.markJobFailed(job.jobId, error);
+  }
+}
+```
+
+### Lifecycle Management
+
+#### Mark Job Completed
+```javascript
+queueManager.markJobCompleted('job_123', {
+  files: ['report.xlsx'],
+  metadata: { rows: 1500, size: '2.5MB' }
+});
+```
+
+#### Mark Job Failed
+```javascript
+queueManager.markJobFailed('job_123', new Error('Network timeout'));
+```
+
+#### Update Job Progress
+```javascript
+queueManager.updateJobProgress('job_123', {
+  'steps.request.status': 'completed',
+  'steps.request.last_attempt_at': new Date(),
+  'progress.percent_complete': 50
+});
+```
+
+### Download Scheduling
+
+#### Manual Download Scheduling
+```javascript
+const downloadJob = queueManager.scheduleDownloadForSuccessfulRequest(requestJob);
+console.log('Download scheduled for:', downloadJob.scheduled_for);
+```
+
+#### Process Due Downloads
+```javascript
+const dueDownloads = queueManager.enqueueDueDownloads();
+console.log(`${dueDownloads.length} downloads are due`);
+```
+
+### File Queue Operations
+
+#### Get File Tasks
+```javascript
+const fileTasks = queueManager.getNextFileTasks(5); // Get up to 5 tasks
+```
+
+#### Mark File Task Complete
+```javascript
+queueManager.markFileTaskCompleted('download_123', {
+  filePath: '/tmp/report.xlsx',
+  size: '2.5MB'
+});
+```
+
+## Monitoring & Metrics
+
+### Queue Status
+```javascript
+const status = queueManager.getQueuesStatus();
+console.log('Queue lengths:', {
+  manual: status.manualQueueLength,
+  bulk: status.bulkQueueLength,
+  file: status.fileQueueLength,
+  inFlight: status.inFlightCount,
+  scheduledDownloads: status.scheduledDownloadsCount
+});
+```
+
+### System Snapshot
+```javascript
+const snapshot = await queueManager.getSystemSnapshot();
+console.log('System health:', {
+  resourceStatus: snapshot.resourceStatus,
+  queueStatus: {
+    manual: snapshot.manualQueueLength,
+    bulk: snapshot.bulkQueueLength
+  },
+  timestamp: snapshot.timestamp
+});
+```
+
+### Batch Preview
+```javascript
+const preview = queueManager.getBatchPreview();
+preview.forEach(job => {
+  console.log(`${job.queue}[${job.position}]: ${job.jobId} (${job.operation})`);
+});
+```
+
+### In-Flight Jobs
+```javascript
+const inFlight = queueManager.getInFlightJobs();
+console.log(`${inFlight.length} jobs currently processing`);
+```
+
+### Filtered Job Search
+```javascript
+const requestJobs = queueManager.getPendingJobs({ operation: 'request' });
+const manualJobs = queueManager.getPendingJobs({ mode: 'manual' });
+const sellerJobs = queueManager.getPendingJobs({ seller_id: 'seller123' });
+```
+
+## Maintenance Operations
+
+### Drain All Queues
+```javascript
+const drained = queueManager.drainAll();
+console.log('Drained jobs:', {
+  manual: drained.manual.length,
+  bulk: drained.bulk.length,
+  file: drained.file.length
+});
+```
+
+### Purge Failed Jobs
+```javascript
+queueManager.purgeFailed({ 
+  before: new Date('2024-01-01'),
+  operation: 'request'
+});
+```
+
+## Configuration Options
+
+### Resource Thresholds
+```javascript
+const queueManager = createQueueManager({
+  resourceThresholds: {
+    maxCPUUsagePercent: 80,    // Pause if CPU > 80%
+    maxMemoryUsagePercent: 85, // Pause if memory > 85%
+    minFreeMemoryMB: 1024      // Pause if free memory < 1GB
+  }
+});
+```
+
+### Retry Configuration
+```javascript
+const queueManager = createQueueManager({
+  retryConfig: {
+    MAX_RETRIES_ATTEMPTS: 3,
+    RETRY_DELAYS_MS: [60000, 180000, 300000] // 1min, 3min, 5min
+  }
+});
+```
+
+### Cooldown Settings
+```javascript
+const queueManager = createQueueManager({
+  cooldownMs: 2000, // 2 seconds between requests to same domain
+  defaultDownloadDelayMs: 10 * 60 * 1000 // 10 minutes
+});
+```
+
+## Integration Patterns
+
+### With Express Routes
+```javascript
+// POST /scrape/single
+app.post('/scrape/single', async (req, res) => {
+  try {
+    const job = queueManager.addJob({
+      ...req.body,
+      jobId: generateJobId(),
+      mode: 'manual'
+    });
+    res.json({ jobId: job.jobId, status: 'enqueued' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// POST /scrape/bulk
+app.post('/scrape/bulk', async (req, res) => {
+  const results = queueManager.addJobs(req.body.map(job => ({
+    ...job,
+    jobId: generateJobId(),
+    mode: 'bulk'
+  })));
+  res.json({ results });
+});
+```
+
+### With Database Updates
+```javascript
+const queueManager = createQueueManager({
+  onJobEnqueued: async (job) => {
+    await Report.create({
+      job_id: job.jobId,
+      seller_id: job.seller_id,
+      identifier: job.identifier,
+      reportType: job.reportType,
+      status: job.status,
+      enqueued_at: job.enqueued_at
+    });
+  },
+  onJobCompleted: async (job, result) => {
+    await Report.findOneAndUpdate(
+      { job_id: job.jobId },
+      { 
+        status: job.status,
+        completed_at: job.completed_at,
+        files: result.files
+      }
+    );
+  }
+});
+```
+
+### With File Worker Pool
+```javascript
+// In your file worker pool
+setInterval(async () => {
+  const fileTasks = queueManager.getNextFileTasks(5);
+  for (const task of fileTasks) {
+    try {
+      const result = await processFileTask(task);
+      queueManager.markFileTaskCompleted(task.id, result);
+    } catch (error) {
+      queueManager.markFileTaskFailed(task.id, error);
+    }
+  }
+}, 1000);
+```
+
+## Error Handling
+
+### Validation Errors
+```javascript
+try {
+  queueManager.addJob(invalidJob);
+} catch (error) {
+  if (error.message === 'Invalid job for enqueue') {
+    // Handle validation error
+  } else if (error.message.includes('already exists')) {
+    // Handle duplicate job
+  }
+}
+```
+
+### Resource Limit Errors
+```javascript
+const isEligible = queueManager.isEligibleToRun(job);
+if (!isEligible) {
+  console.log('Job not eligible due to resource limits or cooldown');
+}
+```
+
+## Best Practices
+
+### 1. Always Reserve Batches
+```javascript
+const batch = await queueManager.getNextBatch();
+queueManager.reserveBatch(batch); // Prevent duplicate processing
+```
+
+### 2. Handle Job Lifecycle Properly
+```javascript
+try {
+  const result = await processJob(job);
+  queueManager.markJobCompleted(job.jobId, result);
+} catch (error) {
+  queueManager.markJobFailed(job.jobId, error);
+}
+```
+
+### 3. Monitor Resource Usage
+```javascript
+setInterval(async () => {
+  const snapshot = await queueManager.getSystemSnapshot();
+  if (!snapshot.resourceStatus.ok) {
+    console.warn('Resource limits exceeded:', snapshot.resourceStatus.reasons);
+  }
+}, 30000);
+```
+
+### 4. Use Appropriate Priorities
+```javascript
+// High priority for user-initiated requests
+queueManager.addJob({ ...job, mode: 'manual', priority: 'high' });
+
+// Normal priority for bulk operations
+queueManager.addJob({ ...job, mode: 'bulk', priority: 'normal' });
+```
+
+### 5. Implement Proper Error Handling
+```javascript
+const results = queueManager.addJobs(jobs);
+const failedJobs = results.filter(r => r.error);
+if (failedJobs.length > 0) {
+  console.error('Some jobs failed to enqueue:', failedJobs);
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Jobs not processing**: Check resource limits and cooldowns
+2. **Downloads not scheduling**: Verify request jobs complete successfully
+3. **High memory usage**: Adjust resource thresholds
+4. **Queue starvation**: Check priority settings and batch sizes
+
+### Debug Methods
+```javascript
+// Check job eligibility
+const eligible = queueManager.isEligibleToRun(job);
+console.log('Job eligible:', eligible);
+
+// Check resource limits
+const canSpawn = await queueManager.isUnderResourceLimits();
+console.log('Can spawn more tasks:', canSpawn);
+
+// Check cooldown status
+const underCooldown = queueManager.isUnderCooldown('flipkart.com');
+console.log('Domain under cooldown:', underCooldown);
+```
+
+## Performance Considerations
+
+- **Batch Size**: Adjust based on server capacity and resource monitoring
+- **Cooldown Periods**: Balance between rate limiting and throughput
+- **Retry Delays**: Use exponential backoff to avoid overwhelming servers
+- **Resource Monitoring**: Regular checks prevent system overload
+
+## Future Enhancements
+
+- **Persistence**: Redis/database integration for job persistence
+- **Distributed Processing**: Multi-node queue coordination
+- **Advanced Scheduling**: Cron-like scheduling for recurring jobs
+- **Metrics Integration**: Prometheus/Grafana dashboard integration 
