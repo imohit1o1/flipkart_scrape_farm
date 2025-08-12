@@ -7,6 +7,7 @@ export const ENTITY_PREFIXES = {
     API: '[🌐 API]',
     ROUTER: '[🛣️ Router]',
     DB: '[🗄️ DB]',
+    SYSTEM_MONITOR: '[📈 SystemMonitor]',
     // Utils
     ELEMENT_FINDER: '[🔍 ElementFinder]',
     POPUP: '[💢 PopupHandler]',
@@ -27,6 +28,7 @@ export const ENTITY_PREFIXES = {
     // Services and Controllers
     PROGRESS_SERVICE: '[📈 ProgressService]',
     PROGRESS_CONTROLLER: '[🎮 ProgressController]',
+    REPORT_CONTROLLER: '[🎮 ReportController]',
     STORJ_SERVICE: '[☁️ StorjService]',
     NAVIGATION_MANAGER: '[🏠 NavigationManager]',
 };
@@ -61,13 +63,28 @@ export const LOG_ACTIONS = {
 };
 
 /**
- * CPU analytics
+ * System resource monitoring and batch sizing configuration
  */
-export const CPU_ANALYTICS = {
-    MAX_CPU_USAGE_PERCENT: 80,
-    MAX_MEMORY_USAGE_PERCENT: 85,
-    MIN_FREE_MEMORY_MB: 2048,
-}
+export const SYSTEM_RESOURCE_CONFIG = {
+    // Resource limit thresholds
+    LIMITS: {
+        MAX_CPU_USAGE_PERCENT: 80,
+        MAX_MEMORY_USAGE_PERCENT: 85,
+    },
+    // Dynamic batch sizing thresholds
+    BATCH_THRESHOLDS: {
+        LOW_LOAD: { CPU: 50, MEMORY: 60 },
+        MEDIUM_LOAD: { CPU: 70, MEMORY: 75 },
+        HIGH_LOAD: { CPU: 80, MEMORY: 85 }
+    },
+    // Corresponding batch sizes
+    BATCH_SIZES: {
+        MAXIMUM: 20,
+        STANDARD: 16,
+        REDUCED: 12,
+        MINIMUM: 8
+    }
+};
 
 /**
 * JSON parse limit
@@ -205,3 +222,5 @@ export const TIMEOUT_MS = {
 export const DOWNLOAD_URLS = {
     FLIPKART_STORAGE_REPORTS: 'https://api.flipkart.net/storage/reports'
 }
+
+

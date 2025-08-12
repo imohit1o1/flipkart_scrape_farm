@@ -1,17 +1,18 @@
 import express from 'express';
-import { scrapeSingleRouter } from './scrape_single.routes.js';
-import { scrapeParallelRouter } from './scrape_parallel.routes.js';
+import { scrapeManualRouter } from './scrape_manual.routes.js';
+import { scrapeBulkRouter } from './scrape_bulk.routes.js';
 import { progressRouter } from './progress.routes.js';
 import { reportTypeRouter } from './report_type.routes.js';
+import { systemMonitorRouter } from './system_monitor.routes.js';
 
 const router = express.Router();
 
 
 //* Single user scraping
-router.use('/scrape/single', scrapeSingleRouter);
+router.use('/scrape/manual', scrapeManualRouter);
 
 //* Parallel/bulk user scraping
-router.use('/scrape/parallel', scrapeParallelRouter);
+router.use('/scrape/bulk', scrapeBulkRouter);
 
 //* Progress
 router.use('/progress', progressRouter);
@@ -21,5 +22,5 @@ router.use('/report-types', reportTypeRouter);
 
 
 // export { mainDocsRouter } from "./docs.routes.js";
-// export { systemInfoRouter } from "./system_info.routes.js"
+router.use('/system-monitor', systemMonitorRouter);
 export { router as routes };

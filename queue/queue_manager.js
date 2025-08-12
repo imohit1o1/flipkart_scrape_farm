@@ -1,209 +1,381 @@
-import { queueTypes, RETRY_DELAYS, ENTITY_PREFIXES, LOG_ACTIONS } from '../constants.js';
-import { logger, FlipkartScraperError, TrackingManager, ServerMetricsManager } from './index.js';
-import { ReportService } from '../services/index.js';
+import { ApiError, logger } from '../utils/index.js';
+import { SystemMonitorService } from '../services/system_monitor.service.js';
+import { ENTITY_PREFIXES, LOG_ACTIONS, queueTypes, STEP_NAMES, TASK_STATUS, SYSTEM_RESOURCE_CONFIG, DISPATCH_INTERVAL_MS } from '../constants.js';
+import { ReportService } from '../services/report.service.js';
 
-/**
- * 
- */
-const QueueManager = {
+// ===== STATE MANAGEMENT =====
+const state = {
     manualQueue: [],
     bulkQueue: [],
-    allJobs: [],
+    inFlightJobs: new Map(),
+    workerThreads: [],
+    resourceMonitor: null,
+    isProcessing: false,
+
+    // Dynamic configuration
+    currentWorkerThreads: 4,
+    currentBatchSize: 16,
+    maxWorkerThreads: 8,
+    minWorkerThreads: 1,
+    maxBatchSize: 32,
+    minBatchSize: 1,
+
+    // Configuration
+    pollingInterval: 1000,
+    databaseUpdateInterval: 5000
+};
+
+const QueueManager = {
+
+    // ===== UTILITY FUNCTIONS =====
 
     /**
-     * Add a job to the appropriate queue and create database records
-     * @param {string} type - queueTypes.MANUAL or queueTypes.BULK
-     * @param {object} jobData - job payload (should have unique 'job_id')
+     * Check if job already exists in any queue
+     * @param {string} jobId - Job ID to check
+     * @returns {boolean} True if job exists
      */
-    async addToQueue(type, jobData) {
+    isJobDuplicate: (jobId) => {
+        return state.manualQueue.some(job => job.job_id === jobId) ||
+            state.bulkQueue.some(job => job.job_id === jobId) ||
+            state.inFlightJobs.has(jobId);
+    },
+
+    // ===== RESOURCE MONITORING =====
+
+    /**
+     * Check current resource limits using systemMonitor.canSpawnMoreHeavyTasks
+     * @returns {Promise<boolean>} True if resources are within limits
+     */
+    checkResourceLimits: async () => {
         try {
-            // Add to queue first
-            if (type === queueTypes.MANUAL) {
-                this.manualQueue.push(jobData);
-                logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Added job to manual queue: ${jobData.job_id}`);
-            } else if (type === queueTypes.BULK) {
-                this.bulkQueue.push(jobData);
-                logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Added job to bulk queue: ${jobData.job_id}`);
-            } else {
-                logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.FAILED} Unknown queue type: ${type}`);
-                throw new MeeshoScraperError('queue_manager_error', `Unknown queue type: ${type}`, jobData?.job_id);
+            return await SystemMonitorService.canSpawnMoreWorkers();
+        } catch (error) {
+            logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.ERROR} Resource check failed:`, error);
+            return false;
+        }
+    },
+
+    /**
+     * Get optimal batch size based on current resources using systemMonitor.getOptimalBatchSize
+     * @returns {Promise<number>} Optimal batch size
+     */
+    getOptimalBatchSize: async () => {
+        try {
+            const suggested = await SystemMonitorService.getOptimalBatchSize();
+            return Math.max(state.minBatchSize, Math.min(state.maxBatchSize, suggested));
+        } catch (error) {
+            logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.ERROR} Batch size calculation failed:`, error);
+            return state.currentBatchSize;
+        }
+    },
+
+    /**
+     * Monitor resources in real-time using systemMonitor.monitorResources
+     * @returns {Promise<Object>} Current resource status
+     */
+    monitorResources: async () => {
+        try {
+            return await SystemMonitorService.getSystemSnapshot();
+        } catch (error) {
+            logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.ERROR} Resource monitoring failed:`, error);
+            return null;
+        }
+    },
+    // ===== ENQUEUE OPERATIONS =====
+
+    /**
+     * Add job to specific queue
+     * @param {string} queueType - Queue type (manual/bulk)
+     * @param {Object} jobData - Job data
+     * @returns {Object} Enriched job
+     */
+    addToQueue: async (queueType, jobData) => {
+        try {
+            const jobId = jobData.job_id || QueueUtils.generateJobId(jobData.auth?.identifier ?? 'unknown');
+
+            if (QueueManager.isJobDuplicate(jobId)) {
+                throw new Error(`Job ${jobId} already exists`);
             }
 
-            // Create database records first and then tracking file
-            await ReportService.createJobDatabaseRecords(jobData);
-            await TrackingManager.ensureTrackingFileExists(jobData.auth, jobData.job_id, jobData.requested_operations);
-            
-            // Small delay to ensure all database records are fully created
-            await new Promise(resolve => setTimeout(resolve, 100));
+            const enrichedJob = {
+                job_id: jobId,
+                jobId, // compatibility for existing controller response
+                auth: jobData.auth,
+                seller_id: jobData.auth?.seller_id,
+                reportType: jobData.reportType,
+                parameters: jobData.parameters,
+                requested_operations: jobData.requested_operations,
+                operation_steps: jobData.operation_steps || STEP_NAMES.REQUEST,
+                status: TASK_STATUS.ENQUEUED,
+                createdAt: new Date().toISOString(),
+                enqueued_at: new Date().toISOString(),
+                attempts: 0,
+                startedAt: null,
+                completedAt: null,
+                error: null,
+                result: null
+            };
 
-            // Update metrics after enqueuing
-            ServerMetricsManager.updateTaskMetrics({ enqueuedJobs: [jobData.job_id] });
+            if (queueType === queueTypes.MANUAL) {
+                state.manualQueue.unshift(enrichedJob); // priority
+                logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.ENQUEUED} Job ${jobId} added to manual queue`);
+            } else if (queueType === queueTypes.BULK) {
+                state.bulkQueue.push(enrichedJob);
+                logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.ENQUEUED} Job ${jobId} added to bulk queue`);
+            } else {
+                throw new ApiError('queue_manager_error', `Unknown queue type: ${queueType}`, jobId);
+            }
 
+            // Persist DB records for enabled types if provided
+            if (enrichedJob.requested_operations) {
+                await ReportService.createManualReports({
+                    job_id: enrichedJob.job_id,
+                    auth: enrichedJob.auth,
+                    requested_operations: enrichedJob.requested_operations,
+                    createdAt: enrichedJob.createdAt,
+                    parameters: enrichedJob.parameters,
+                });
+            }
+
+            // Small delay to ensure DB writes complete before returning
+            await new Promise(resolve => setTimeout(resolve, DISPATCH_INTERVAL_MS));
+
+            return enrichedJob;
         } catch (error) {
-            logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.FAILED} Error adding job to queue: ${error.message}`);
-            throw error;
+            logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.FAILED} Failed to add job to queue:`, error);
+            throw new ApiError('queue_manager_error', `Failed to add job to queue: ${error.message}`, jobData?.job_id);
+        }
+    },
+
+    // ===== PROCESSING OPERATIONS =====
+
+    /**
+     * Get next batch of jobs for processing
+     * @returns {Promise<Array>} Batch of jobs
+     */
+    getNextBatch: async () => {
+        const batch = [];
+        const optimalBatchSize = await QueueManager.getOptimalBatchSize();
+
+        // Process manual queue first (priority)
+        while (batch.length < optimalBatchSize && state.manualQueue.length > 0) {
+            batch.push(state.manualQueue.shift());
+        }
+
+        // Then process bulk queue
+        while (batch.length < optimalBatchSize && state.bulkQueue.length > 0) {
+            batch.push(state.bulkQueue.shift());
+        }
+
+        return batch;
+    },
+    /**
+     * Process a batch of jobs
+     * @param {Array} batch - Batch of jobs to process
+     * @returns {Promise<void>}
+     */
+    processBatch: async (batch) => {
+        if (batch.length === 0) return;
+
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Processing batch of ${batch.length} jobs`);
+
+        for (const job of batch) {
+            try {
+                // Mark job as in progress
+                job.status = TASK_STATUS.IN_PROGRESS;
+                job.startedAt = new Date().toISOString();
+                state.inFlightJobs.set(job.job_id, job);
+
+                // TODO: Send job to worker thread for processing
+                logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Job ${job.job_id} started processing`);
+
+            } catch (error) {
+                logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.FAILED} Job ${job.job_id} failed to start:`, error);
+                markJobFailed(job.job_id, error);
+            }
         }
     },
 
     /**
-     * Add a job to the central allJobs array
-     * @param {object} job - The job object to add (should have unique 'job_id')
+     * Mark job as completed
+     * @param {string} jobId - Job ID
+     * @param {Object} result - Job result
+     * @returns {Object} Updated job
      */
-    addToAllJobs(job) {
-        this.allJobs.push(job);
-    },
-
-    /**
-     * Update a job's status and other fields in allJobs
-     * @param {string} job_id - The job's unique id
-     * @param {object} updates - Fields to update (e.g., { status: 'completed' })
-     */
-    updateJobStatus(job_id, updates) {
-        const idx = this.allJobs.findIndex(j => j.job_id === job_id);
-        if (idx !== -1) {
-            this.allJobs[idx] = { ...this.allJobs[idx], ...updates };
+    markJobCompleted: (jobId, result) => {
+        const job = state.inFlightJobs.get(jobId);
+        if (!job) {
+            throw new Error(`Job ${jobId} not found in flight`);
         }
-    },
 
-    /**
-     * Get the next job, prioritizing manual jobs
-     * @returns {object|null} The next job or null if none
-     */
-    getNextJob() {
-        let job = null;
-        if (this.manualQueue.length > 0) {
-            job = this.manualQueue.shift();
-            logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Dequeued manual job: ${job?.job_id}`);
-        } else if (this.bulkQueue.length > 0) {
-            job = this.bulkQueue.shift();
-            logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Dequeued bulk job: ${job?.job_id}`);
-        }
+        job.status = TASK_STATUS.COMPLETED;
+        job.completedAt = new Date().toISOString();
+        job.result = result;
+
+        state.inFlightJobs.delete(jobId);
+
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.COMPLETED} Job ${jobId} completed successfully`);
+
         return job;
     },
 
     /**
-     * Peek at the next job without removing it
-     * @returns {object|null} The next job or null if none
+     * Mark job as failed
+     * @param {string} jobId - Job ID
+     * @param {Error} error - Error details
+     * @returns {Object} Updated job
      */
-    peekNextJob() {
-        if (this.manualQueue.length > 0) {
-            return this.manualQueue[0];
-        } else if (this.bulkQueue.length > 0) {
-            return this.bulkQueue[0];
+    markJobFailed: (jobId, error) => {
+        const job = state.inFlightJobs.get(jobId);
+        if (!job) {
+            throw new Error(`Job ${jobId} not found in flight`);
         }
+
+        job.status = TASK_STATUS.FAILED;
+        job.completedAt = new Date().toISOString();
+        job.error = error.message;
+        job.attempts++;
+
+        state.inFlightJobs.delete(jobId);
+
+        logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.FAILED} Job ${jobId} failed:`, error);
+
+        return job;
+    },
+
+    // ===== MONITORING OPERATIONS =====
+
+    /**
+     * Get current queue status
+     * @returns {Object} Queue status information
+     */
+    getQueueStatus: () => {
+        return {
+            manualQueueLength: state.manualQueue.length,
+            bulkQueueLength: state.bulkQueue.length,
+            inFlightCount: state.inFlightJobs.size,
+            totalJobs: state.manualQueue.length + state.bulkQueue.length + state.inFlightJobs.size,
+            isProcessing: state.isProcessing,
+            currentWorkerThreads: state.currentWorkerThreads,
+            currentBatchSize: state.currentBatchSize,
+            timestamp: new Date().toISOString()
+        };
+    },
+
+    /**
+     * Get current resource status
+     * @returns {Promise<Object>} Resource status
+     */
+    getResourceStatus: async () => {
+        return await QueueManager.monitorResources();
+    },
+
+    /**
+     * Get specific job status
+     * @param {string} jobId - Job ID
+     * @returns {Object|null} Job status or null if not found
+     */
+    getJobStatus: (jobId) => {
+        // Check in-flight jobs first
+        if (state.inFlightJobs.has(jobId)) {
+            return state.inFlightJobs.get(jobId);
+        }
+
+        // Check manual queue
+        const manualJob = state.manualQueue.find(job => job.job_id === jobId);
+        if (manualJob) return manualJob;
+
+        // Check bulk queue
+        const bulkJob = state.bulkQueue.find(job => job.job_id === jobId);
+        if (bulkJob) return bulkJob;
+
         return null;
     },
 
+    // ===== WORKER THREAD OPERATIONS =====
+
     /**
-     * Remove a job by id from both queues
-     * @param {string|number} job_id - Unique job id
-     * @returns {boolean} True if removed, false if not found
+     * Initialize worker threads
+     * @returns {Promise<void>}
      */
-    removeJobById(job_id) {
-        let idx = this.manualQueue.findIndex(job => job.job_id === job_id);
-        if (idx !== -1) {
-            this.manualQueue.splice(idx, 1);
-            logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.COMPLETED} Removed job from manual queue: ${job_id}`);
-            return true;
-        }
-        idx = this.bulkQueue.findIndex(job => job.job_id === job_id);
-        if (idx !== -1) {
-            this.bulkQueue.splice(idx, 1);
-            logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.COMPLETED} Removed job from bulk queue: ${job_id}`);
-            return true;
-        }
-        logger.warn(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.WARNING} Job not found for removal: ${job_id}`);
-        throw new MeeshoScraperError('queue_manager_error', `Job not found for removal: ${job_id}`, job_id);
+    initializeWorkerThreads: async () => {
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.SETUP} Initializing ${state.currentWorkerThreads} worker threads`);
+
+        // TODO: Implement worker thread initialization
+        // This will be implemented when we add worker thread support
+
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.COMPLETED} Worker threads initialized`);
     },
 
     /**
-     * Clear all jobs from both queues
+     * Distribute job to available thread
+     * @param {Object} job - Job to distribute
+     * @returns {Promise<void>}
      */
-    clearQueues() {
-        this.manualQueue = [];
-        this.bulkQueue = [];
-        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.COMPLETED} Cleared all queues`);
+    distributeJob: async (job) => {
+        // TODO: Implement job distribution to worker threads
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Distributing job ${job.job_id} to worker thread`);
     },
 
     /**
-     * Get stats for both queues
-     * @returns {object} { manualQueueLength, bulkQueueLength, total }
+     * Handle thread failure
+     * @param {string} threadId - Thread ID that failed
+     * @returns {Promise<void>}
      */
-    getStats() {
-        return {
-            manualQueueLength: this.manualQueue.length,
-            bulkQueueLength: this.bulkQueue.length,
-            total: this.manualQueue.length + this.bulkQueue.length
-        };
+    handleThreadFailure: async (threadId) => {
+        logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.FAILED} Worker thread ${threadId} failed`);
+
+        // TODO: Implement thread failure handling
+        // This will be implemented when we add worker thread support
+    },
+
+    // ===== DATABASE OPERATIONS =====
+
+    /**
+     * Persist job to database
+     * @param {Object} jobData - Job data to persist
+     * @returns {Promise<void>}
+     */
+    persistJob: async (jobData) => {
+        // TODO: Implement database persistence
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Persisting job ${jobData.job_id} to database`);
     },
 
     /**
-     * Check if both queues are empty
-     * @returns {boolean}
+     * Update job status in database
+     * @param {string} jobId - Job ID
+     * @param {string} status - New status
+     * @returns {Promise<void>}
      */
-    isEmpty() {
-        return this.manualQueue.length === 0 && this.bulkQueue.length === 0;
+    updateJobStatus: async (jobId, status) => {
+        // TODO: Implement database status update
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Updating job ${jobId} status to ${status} in database`);
     },
 
     /**
-     * Get all jobs (manual, bulk, running, completed, failed, etc.)
-     * @returns {Array} Array of all jobs
+     * Get job history from database
+     * @param {Object} filters - Filter criteria
+     * @returns {Promise<Array>} Job history
      */
-    getAllJobs() {
-        return [...this.allJobs];
+    getJobHistory: async (filters = {}) => {
+        // TODO: Implement database job history retrieval
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.INFO} Retrieving job history with filters:`, filters);
+        return [];
     },
 
-    /**
-     * Get all jobs in a specific queue
-     * @param {string} type - queueTypes.MANUAL or queueTypes.BULK
-     * @returns {Array} Array of jobs in the specified queue
-     */
-    getJobsByType(type) {
-        if (type === queueTypes.MANUAL) return [...this.manualQueue];
-        if (type === queueTypes.BULK) return [...this.bulkQueue];
-        logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.FAILED} Unknown queue type: ${type}`);
-        throw new MeeshoScraperError('queue_manager_error', `Unknown queue type: ${type}`);
-    },
+    // ===== UTILITY OPERATIONS =====
 
     /**
-     * Generates a job ID for a given identifier
-     * @param {string} identifier - User identifier (email or mobile)
-     * @returns {string} Job ID
+     * Cleanup completed jobs
+     * @returns {Promise<void>}
      */
-    generateJobId(identifier) {
-        // Use sanitized identifier to ensure consistency with tracking system
-        const sanitizedIdentifier = TrackingManager._sanitizeIdentifier(identifier);
-        const generateRandomString = (length = 8) => {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-            return Array.from(
-                { length },
-                () => chars.charAt(Math.floor(Math.random() * chars.length))
-            ).join('');
-        };
-        const randomSuffix = generateRandomString(8);
-        return `${sanitizedIdentifier}_${randomSuffix}`;
+    cleanupCompletedJobs: async () => {
+        // TODO: Implement cleanup of old completed jobs
+        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.PROCESSING} Cleaning up completed jobs`);
     },
 
-    /**
-     * Gets the delay for the next retry attempt
-     * @returns {number} Delay in milliseconds
-     */
-    _getRetryDelay(attempt) {
-        return RETRY_DELAYS[attempt];
-    },
 
-    /**
-     * Cleans up retry tracking for a task
-     * @param {string} jobId - Task ID
-     */
-    clearTask(jobId) {
-        const identifier = jobId.split('_')[0];
-        this._retryAttempts.delete(identifier);
-        if (this._retryTimeouts.has(identifier)) {
-            clearTimeout(this._retryTimeouts.get(identifier));
-            this._retryTimeouts.delete(identifier);
-        }
-    }
 };
+
 
 export { QueueManager };

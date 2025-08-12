@@ -1,0 +1,257 @@
+# **Queue Manager Implementation Plan (Const Syntax)**
+
+## **Phase 1: Core Queue Manager Structure**
+
+### **1.1 Create Queue Manager (Const Syntax)**
+- **File**: `queue/queue_manager.js`
+- **Structure**: Const syntax with singleton pattern
+- **Core Properties**:
+  - `manualQueue[]` - High priority jobs
+  - `bulkQueue[]` - Lower priority jobs
+  - `inFlightJobs` - Currently processing jobs
+  - `workerThreads` - Background processing threads
+  - `resourceMonitor` - CPU/memory monitoring
+
+### **1.2 Structure Pattern**
+```javascript
+// Singleton state
+const state = {
+    manualQueue: [],
+    bulkQueue: [],
+    inFlightJobs: new Map(),
+    workerThreads: [],
+    resourceMonitor: null,
+    isProcessing: false
+};
+
+// Individual functions
+const addToQueue = (queueType, jobData) => { /* logic */ };
+const addManualJob = (jobData) => { /* logic */ };
+const addBulkJob = (jobData) => { /* logic */ };
+const getNextBatch = () => { /* logic */ };
+const getQueueStatus = () => { /* logic */ };
+
+// Export single object
+const QueueManager = {
+    addToQueue,
+    addManualJob,
+    addBulkJob,
+    getNextBatch,
+    getQueueStatus,
+    // ... other methods
+};
+
+export { QueueManager };
+```
+
+### **1.3 Job Structure Implementation**
+```javascript
+{
+    job_id: string,
+    auth: { identifier, password, seller_id },
+    reportType: string,
+    parameters: object,
+    operation_steps: STEP_NAMES.REQUEST,
+    status: TASK_STATUS.ENQUEUED,
+    createdAt: string,
+    // Additional fields for tracking
+    startedAt?: string,
+    completedAt?: string,
+    error?: string,
+    attempts: number
+}
+```
+
+---
+
+## **Phase 2: Resource Monitoring Integration**
+
+### **2.1 CPU/Memory Monitoring**
+- **Integration**: Use existing `systemMonitor` from `utils/cpu_analytics.js`
+- **Constants**: Use `CPU_ANALYTICS` from `constants.js`
+- **Monitoring Functions**:
+  - `checkResourceLimits()` - Check if resources are within limits
+  - `getOptimalBatchSize()` - Calculate optimal batch size based on resources
+  - `monitorResources()` - Real-time resource monitoring
+
+### **2.2 Dynamic Batch Sizing**
+- **Logic**: Adjust batch size based on current resource usage
+- **Implementation**: 
+  - Check CPU/memory before dequeuing
+  - Reduce batch size if resources exceed `CPU_ANALYTICS` thresholds
+  - Increase batch size if resources are low
+
+---
+
+## **Phase 3: Worker Threads Implementation**
+
+### **3.1 Thread Pool Setup**
+- **Configuration**: Configurable number of worker threads
+- **Thread Management Functions**:
+  - `initializeWorkerThreads()` - Create thread pool
+  - `distributeJob(job)` - Distribute job to available thread
+  - `handleThreadFailure(threadId)` - Handle thread failures
+
+### **3.2 Job Processing Logic**
+- **Job Distribution**: Round-robin or load-based
+- **Thread Communication**: Message passing between main thread and workers
+- **Error Handling**: Thread-level error isolation
+
+### **3.3 Background Processing Flow**
+```
+Main Thread → QueueManager → Worker Threads → Job Processing → Database Updates
+```
+
+---
+
+## **Phase 4: Database Integration**
+
+### **4.1 Database Schema Design**
+```javascript
+// Jobs Collection
+{
+    job_id: string,
+    auth: object,
+    reportType: string,
+    parameters: object,
+    operation_steps: string,
+    status: string,
+    createdAt: Date,
+    startedAt?: Date,
+    completedAt?: Date,
+    error?: string,
+    attempts: number,
+    result?: object
+}
+```
+
+### **4.2 Database Operations Functions**
+- `persistJob(jobData)` - Save job on enqueue
+- `updateJobStatus(jobId, status)` - Real-time status updates
+- `getJobStatus(jobId)` - Get job status from database
+- `getJobHistory(filters)` - Get job history
+
+---
+
+## **Phase 5: Integration with Existing System**
+
+### **5.1 Controller Integration**
+- **Update**: `controllers/reports.controller.js`
+- **Method**: Use `QueueManager.addToQueue()` instead of direct queue access
+- **Response**: Return job ID for tracking
+
+### **5.2 API Endpoints**
+- **POST** `/scrape/manual` - Enqueue manual job
+- **GET** `/scrape/manual/status` - Queue status
+- **GET** `/jobs/{jobId}/status` - Individual job status
+
+---
+
+## **Implementation Order**
+
+### **Week 1: Core Structure (Const Syntax)**
+1. Create QueueManager with const syntax
+2. Implement basic queue operations
+3. Add job structure validation
+4. Create basic enqueue/dequeue methods
+
+### **Week 2: Resource Monitoring**
+1. Integrate CPU/memory monitoring
+2. Implement dynamic batch sizing
+3. Add resource threshold checks
+4. Test resource-aware processing
+
+### **Week 3: Worker Threads**
+1. Set up thread pool
+2. Implement job distribution
+3. Add thread communication
+4. Test background processing
+
+### **Week 4: Database Integration**
+1. Design database schema
+2. Implement job persistence
+3. Add status updates
+4. Test database operations
+
+### **Week 5: Integration & Testing**
+1. Update controllers
+2. Add API endpoints
+3. Implement error handling
+4. End-to-end testing
+
+---
+
+## **Configuration Options**
+
+```javascript
+const queueConfig = {
+    // Dynamic Configuration (No Fixed Limits)
+    maxWorkerThreads: 4,        // Can be adjusted based on system resources
+    maxBatchSize: 16,           // Can be adjusted based on CPU/memory usage
+    
+    // Resource Thresholds (from constants.js)
+    resourceThresholds: {
+        maxCPUUsage: CPU_ANALYTICS.MAX_CPU_USAGE_PERCENT,      // 80%
+        maxMemoryUsage: CPU_ANALYTICS.MAX_MEMORY_USAGE_PERCENT, // 85%
+        minFreeMemory: CPU_ANALYTICS.MIN_FREE_MEMORY_MB        // 2048 MB
+    },
+    
+    // Processing Configuration
+    pollingInterval: 1000, // ms
+    databaseUpdateInterval: 5000, // ms
+    
+    // Queue Configuration (No Limits)
+    // maxManualQueueSize: 100,  // REMOVED - No limits
+    // maxBulkQueueSize: 500,    // REMOVED - No limits
+};
+```
+
+---
+
+## **Queue Manager Methods Structure**
+
+```javascript
+const QueueManager = {
+    // Enqueue Operations
+    addToQueue,
+    addManualJob,
+    addBulkJob,
+    
+    // Processing Operations
+    getNextBatch,
+    processBatch,
+    markJobCompleted,
+    markJobFailed,
+    
+    // Monitoring Operations
+    getQueueStatus,
+    getResourceStatus,
+    getJobStatus,
+    
+    // Worker Thread Operations
+    initializeWorkerThreads,
+    distributeJob,
+    handleThreadFailure,
+    
+    // Database Operations
+    persistJob,
+    updateJobStatus,
+    getJobHistory,
+    
+    // Utility Operations
+    generateJobId,
+    validateJob,
+    cleanupCompletedJobs
+};
+```
+
+---
+
+## **Success Criteria**
+
+1. **Performance**: Jobs processed within acceptable time limits
+2. **Reliability**: No job loss, proper error handling
+3. **Scalability**: System handles increased load
+4. **Monitoring**: Real-time visibility into queue status
+5. **Integration**: Seamless integration with existing controllers
+6. **Code Style**: Consistent const syntax throughout

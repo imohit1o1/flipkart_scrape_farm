@@ -42,17 +42,14 @@ const ReportSchema = new Schema({
     job_id: {
         type: String,
         required: [true, 'Job ID is required'],
-        index: true
     },
     seller_id: {
         type: String,
         required: [true, 'Seller ID is required'],
-        index: true
     },
     identifier: {
         type: String,
         required: [true, 'Identifier is required'],
-        index: true
     },
     password: {
         type: String,
@@ -205,6 +202,7 @@ const ReportSchema = new Schema({
 
 // Indexes for better query performance
 ReportSchema.index({ job_id: 1 });
+ReportSchema.index({ identifier: 1 });
 ReportSchema.index({ seller_id: 1, reportType: 1 });
 ReportSchema.index({ status: 1, createdAt: -1 });
 ReportSchema.index({ identifier: 1, reportType: 1 });

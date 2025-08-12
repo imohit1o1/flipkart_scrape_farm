@@ -1,5 +1,5 @@
 import { validationResult } from 'express-validator';
-import { FlipkartScraperError } from '../utils/index.js';
+import { ApiError } from '../utils/index.js';
 
 const validationMiddleware = (req, res, next) => {
   const errors = validationResult(req);
@@ -14,7 +14,7 @@ const validationMiddleware = (req, res, next) => {
     location: err.location,
   }));
 
-  const error = new FlipkartScraperError('VALIDATION_ERROR', 'Request validation failed', null, { errors: formatted });
+  const error = new ApiError('VALIDATION_ERROR', 'Request validation failed', null, { errors: formatted });
   return res.status(400).json({
     name: error.name,
     type: error.type,

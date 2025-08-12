@@ -1,7 +1,7 @@
-class FlipkartScraperError extends Error {
+class ApiError extends Error {
     constructor(type, message, jobId = null, details = {}) {
         super(message);
-        this.name = 'FlipkartScraperError';
+        this.name = 'ApiError';
         this.type = type;
         this.jobId = jobId;
         this.details = details;
@@ -9,4 +9,4 @@ class FlipkartScraperError extends Error {
     };
 };
 
-export { FlipkartScraperError }; 
+export { ApiError }; 

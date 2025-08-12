@@ -1,0 +1,381 @@
+{
+    "info": {
+        "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "name": "System Monitor API",
+        "description": "Real-time system monitoring endpoints for CPU, memory, and resource management",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_exporter_id": "12345678"
+    },
+    "item": [
+        {
+            "name": "CPU Usage",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/system-monitor/cpu",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "system-monitor",
+                        "cpu"
+                    ]
+                },
+                "description": "Get current CPU usage percentage (0-100) - Shows actual system load including all running applications"
+            },
+            "response": [
+                {
+                    "name": "Success Response",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/system-monitor/cpu",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "system-monitor",
+                                "cpu"
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "cookie": [],
+                    "body": "{\n    \"success\": true,\n    \"message\": \"CPU usage retrieved successfully\",\n    \"data\": {\n        \"cpuUsage\": 25,\n        \"timestamp\": \"2024-01-15T10:30:00.000Z\"\n    }\n}"
+                }
+            ]
+        },
+        {
+            "name": "Memory Usage",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/system-monitor/memory",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "system-monitor",
+                        "memory"
+                    ]
+                },
+                "description": "Get current memory usage percentage and free memory in MB"
+            },
+            "response": [
+                {
+                    "name": "Success Response",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/system-monitor/memory",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "system-monitor",
+                                "memory"
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "cookie": [],
+                    "body": "{\n    \"success\": true,\n    \"message\": \"Memory usage retrieved successfully\",\n    \"data\": {\n        \"memoryUsage\": 68,\n        \"freeMemoryMB\": 2048,\n        \"timestamp\": \"2024-01-15T10:30:00.000Z\"\n    }\n}"
+                }
+            ]
+        },
+        {
+            "name": "Optimal Batch Size",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/system-monitor/batch-size",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "system-monitor",
+                        "batch-size"
+                    ]
+                },
+                "description": "Get optimal batch size based on current system load"
+            },
+            "response": [
+                {
+                    "name": "Success Response",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/system-monitor/batch-size",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "system-monitor",
+                                "batch-size"
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "cookie": [],
+                    "body": "{\n    \"success\": true,\n    \"message\": \"Optimal batch size calculated successfully\",\n    \"data\": {\n        \"optimalBatchSize\": 16,\n        \"timestamp\": \"2024-01-15T10:30:00.000Z\"\n    }\n}"
+                }
+            ]
+        },
+        {
+            "name": "Worker Capacity",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/system-monitor/worker-capacity",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "system-monitor",
+                        "worker-capacity"
+                    ]
+                },
+                "description": "Check if system can handle more background workers"
+            },
+            "response": [
+                {
+                    "name": "Success Response",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/system-monitor/worker-capacity",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "system-monitor",
+                                "worker-capacity"
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "cookie": [],
+                    "body": "{\n    \"success\": true,\n    \"message\": \"Worker capacity checked successfully\",\n    \"data\": {\n        \"canSpawnMoreWorkers\": true,\n        \"timestamp\": \"2024-01-15T10:30:00.000Z\"\n    }\n}"
+                }
+            ]
+        },
+        {
+            "name": "System Snapshot",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/system-monitor/snapshot",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "system-monitor",
+                        "snapshot"
+                    ]
+                },
+                "description": "Get comprehensive system metrics including CPU, memory, and recommendations"
+            },
+            "response": [
+                {
+                    "name": "Success Response",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/system-monitor/snapshot",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "system-monitor",
+                                "snapshot"
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "cookie": [],
+                    "body": "{\n    \"success\": true,\n    \"message\": \"System snapshot retrieved successfully\",\n    \"data\": {\n        \"timestamp\": \"2024-01-15T10:30:00.000Z\",\n        \"cpu\": {\n            \"current\": 45\n        },\n        \"memory\": {\n            \"current\": 68,\n            \"freeMemoryMB\": 2048,\n            \"totalMemoryMB\": 8192\n        },\n        \"system\": {\n            \"loadAverage\": [1.2, 1.5, 1.8],\n            \"uptime\": 86400,\n            \"platform\": \"linux\",\n            \"cpuCount\": 8\n        },\n        \"recommendations\": {\n            \"optimalBatchSize\": 16,\n            \"canSpawnMoreWorkers\": true,\n            \"resourceStatus\": \"MEDIUM\"\n        }\n    }\n}"
+                }
+            ]
+        },
+        {
+            "name": "Reset Monitoring",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": ""
+                },
+                "url": {
+                    "raw": "{{base_url}}/system-monitor/reset",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "system-monitor",
+                        "reset"
+                    ]
+                },
+                "description": "Reset system monitoring history and internal state"
+            },
+            "response": [
+                {
+                    "name": "Success Response",
+                    "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": ""
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/system-monitor/reset",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "system-monitor",
+                                "reset"
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "cookie": [],
+                    "body": "{\n    \"success\": true,\n    \"message\": \"System monitoring reset successfully\",\n    \"data\": {\n        \"reset\": true,\n        \"timestamp\": \"2024-01-15T10:30:00.000Z\"\n    }\n}"
+                }
+            ]
+        }
+    ],
+    "event": [
+        {
+            "listen": "prerequest",
+            "script": {
+                "type": "text/javascript",
+                "exec": [
+                    "// Wait 1 second between requests for accurate CPU measurement",
+                    "if (pm.globals.get('lastCpuCall')) {",
+                    "    const lastCall = parseInt(pm.globals.get('lastCpuCall'));",
+                    "    const now = Date.now();",
+                    "    const timeDiff = now - lastCall;",
+                    "    ",
+                    "    if (timeDiff < 1000) {",
+                    "        const waitTime = 1000 - timeDiff;",
+                    "        setTimeout(() => {}, waitTime);",
+                    "    }",
+                    "}",
+                    "pm.globals.set('lastCpuCall', Date.now().toString());"
+                ]
+            }
+        },
+        {
+            "listen": "test",
+            "script": {
+                "type": "text/javascript",
+                "exec": [
+                    "pm.test(\"Status code is 200\", function () {",
+                    "    pm.response.to.have.status(200);",
+                    "});",
+                    "",
+                    "pm.test(\"Response has success field\", function () {",
+                    "    var jsonData = pm.response.json();",
+                    "    pm.expect(jsonData).to.have.property('success');",
+                    "    pm.expect(jsonData.success).to.be.true;",
+                    "});",
+                    "",
+                    "pm.test(\"Response has data field\", function () {",
+                    "    var jsonData = pm.response.json();",
+                    "    pm.expect(jsonData).to.have.property('data');",
+                    "});",
+                    "",
+                    "pm.test(\"Response has timestamp\", function () {",
+                    "    var jsonData = pm.response.json();",
+                    "    pm.expect(jsonData.data).to.have.property('timestamp');",
+                    "});",
+                    "",
+                    "pm.test(\"CPU usage is valid percentage\", function () {",
+                    "    var jsonData = pm.response.json();",
+                    "    pm.expect(jsonData.data).to.have.property('cpuUsage');",
+                    "    pm.expect(jsonData.data.cpuUsage).to.be.a('number');",
+                    "    pm.expect(jsonData.data.cpuUsage).to.be.at.least(0);",
+                    "    pm.expect(jsonData.data.cpuUsage).to.be.at.most(100);",
+                    "});"
+                ]
+            }
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000",
+            "type": "string"
+        }
+    ]
+}

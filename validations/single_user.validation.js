@@ -31,63 +31,65 @@ const ALLOWED_REPORT_TYPES = [
     SCRAPER_ITEMS.ITEMS.TAX_REPORT.TDS_REPORT,
 ];
 
-const singleUserValidation = [
-    body('seller_id')
-        .exists({ checkNull: true }).withMessage('seller_id is required')
-        .bail()
-        .isString().withMessage('seller_id must be a string')
-        .bail()
-        .notEmpty().withMessage('seller_id cannot be empty'),
+const singleUserValidation = () => {
+    return [
+        body('seller_id')
+            .exists({ checkNull: true }).withMessage('seller_id is required')
+            .bail()
+            .isString().withMessage('seller_id must be a string')
+            .bail()
+            .notEmpty().withMessage('seller_id cannot be empty'),
 
-    body('identifier')
-        .exists({ checkNull: true }).withMessage('identifier is required')
-        .bail()
-        .isString().withMessage('identifier must be a string')
-        .bail()
-        .notEmpty().withMessage('identifier cannot be empty'),
+        body('identifier')
+            .exists({ checkNull: true }).withMessage('identifier is required')
+            .bail()
+            .isString().withMessage('identifier must be a string')
+            .bail()
+            .notEmpty().withMessage('identifier cannot be empty'),
 
-    body('otp_login')
-        .optional()
-        .isBoolean().withMessage('otp_login must be a boolean')
-        .toBoolean(),
+        body('otp_login')
+            .optional()
+            .isBoolean().withMessage('otp_login must be a boolean')
+            .toBoolean(),
 
-    // password required when otp_login is false or missing
-    body('password')
-        .if((value, { req }) => req.body.otp_login === false || req.body.otp_login === undefined)
-        .exists({ checkNull: true }).withMessage('password is required when otp_login is false')
-        .bail()
-        .isString().withMessage('password must be a string')
-        .bail()
-        .notEmpty().withMessage('password cannot be empty'),
+        // password required when otp_login is false or missing
+        body('password')
+            .if((value, { req }) => req.body.otp_login === false || req.body.otp_login === undefined)
+            .exists({ checkNull: true }).withMessage('password is required when otp_login is false')
+            .bail()
+            .isString().withMessage('password must be a string')
+            .bail()
+            .notEmpty().withMessage('password cannot be empty'),
 
-    // reportType must be one of allowed types
-    body('reportType')
-        .exists({ checkNull: true })
-        .withMessage('reportType is required')
-        .isString()
-        .withMessage('reportType must be a string')
-        .isIn(ALLOWED_REPORT_TYPES).withMessage('reportType is not supported'),
+        // reportType must be one of allowed types
+        body('reportType')
+            .exists({ checkNull: true })
+            .withMessage('reportType is required')
+            .isString()
+            .withMessage('reportType must be a string')
+            .isIn(ALLOWED_REPORT_TYPES).withMessage('reportType is not supported'),
 
-    // Required parameters.dateRange
-    body('parameters')
-        .exists({ checkNull: true })
-        .withMessage('parameters is required')
-        .isObject()
-        .withMessage('parameters must be an object'),
+        // Required parameters.dateRange
+        body('parameters')
+            .exists({ checkNull: true })
+            .withMessage('parameters is required')
+            .isObject()
+            .withMessage('parameters must be an object'),
 
-    body('parameters.startDate')
-        .exists({ checkNull: true }).withMessage('parameters.startDate is required')
-        .matches(/^\d{4}-\d{2}-\d{2}$/).withMessage('parameters.startDate must be in yyyy-mm-dd format'),
-    body('parameters.endDate')
-        .exists({ checkNull: true }).withMessage('parameters.endDate is required')
-        .matches(/^\d{4}-\d{2}-\d{2}$/).withMessage('parameters.endDate must be in yyyy-mm-dd format')
-        .custom((end, { req }) => {
-            const start = req?.body?.parameters?.startDate;
-            if (start && end && new Date(end) < new Date(start)) {
-                throw new Error('parameters.endDate must be greater than or equal to startDate');
-            }
-            return true;
-        }),
-];
+        body('parameters.startDate')
+            .exists({ checkNull: true }).withMessage('parameters.startDate is required')
+            .matches(/^\d{4}-\d{2}-\d{2}$/).withMessage('parameters.startDate must be in yyyy-mm-dd format'),
+        body('parameters.endDate')
+            .exists({ checkNull: true }).withMessage('parameters.endDate is required')
+            .matches(/^\d{4}-\d{2}-\d{2}$/).withMessage('parameters.endDate must be in yyyy-mm-dd format')
+            .custom((end, { req }) => {
+                const start = req?.body?.parameters?.startDate;
+                if (start && end && new Date(end) < new Date(start)) {
+                    throw new Error('parameters.endDate must be greater than or equal to startDate');
+                }
+                return true;
+            }),
+    ];
+};
 
 export { singleUserValidation };
