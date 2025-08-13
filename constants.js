@@ -111,22 +111,21 @@ export const SCRAPER_ITEMS = {
         },
         INVENTORY_REPORT: {
             KEY: "inventoy_report",
-            ALL_INVENTORY_REPORT: "all_inventory_report"
+            INVENTORY_REPORT: "inventory_report"
         },
-        ORDERS: {
-            KEY: 'orders',
-            ACTIVE_ORDERS: {
-                KEY: 'active_orders',
-                PROCESSING_ORDERS: 'processing_orders',
-                DISPATCHED_ORDERS: 'dispatched_orders',
-                COMPLETED_ORDERS: 'completed_orders',
-                UPCOMING_ORDERS: 'upcoming_orders',
+        ORDERS_REPORT: {
+            KEY: 'orders_report',
+            ACTIVE_ORDERS_REPORT: {
+                KEY: 'active_orders_report',
+                DISPATCHED_ORDERS_REPORT: 'dispatched_orders_report',
+                COMPLETED_ORDERS_REPORT: 'completed_orders_report',
+                UPCOMING_ORDERS_REPORT: 'upcoming_orders_report',
             },
-            RETURNS_ORDERS: {
-                KEY: 'returns_orders',
+            RETURNS_ORDERS_REPORT: {
+                KEY: 'returns_orders_report',
             },
-            CANCELLED_ORDERS: {
-                KEY: 'cancelled_orders',
+            CANCELLED_ORDERS_REPORT: {
+                KEY: 'cancelled_orders_report',
             },
         },
         FULFILMENT_REPORT: {
@@ -135,11 +134,11 @@ export const SCRAPER_ITEMS = {
         },
         INVOICE_REPORT: {
             KEY: 'invoice_report',
-            INVOICE_REPORT: 'invoice_report'
+            COMMISSION_INVOICE_REPORT: 'commission_invoice_report'
         },
         PAYMENT_REPORT: {
             KEY: 'payment_report',
-            FINANCIAL_REPORT: 'financial_report',
+            FINANCIAL_YEARLY_REPORT: 'financial_yearly_report',
             SETTLED_TRANSACTIONS_REPORT: 'settled_transactions_report',
         },
         TAX_REPORT: {
@@ -158,8 +157,8 @@ export const TASK_STATUS = {
     ENQUEUED: "enqueued",
     IN_PROGRESS: "in_progress",
     COMPLETED: "completed",
-    FAILED: "failed",
     PENDING: "pending",
+    FAILED: "failed",
     COOLDOWN: "cooldown",
     RETRYING: "retrying",
 }
@@ -195,9 +194,10 @@ export const DISPATCH_INTERVAL_MS = 1000; // 1 second between dispatch cycles
 /**
  * Step names for tracking
  */
-export const STEP_NAMES = {
+export const PHASES = {
     REQUEST: "request",
-    DOWNLOAD: "download"
+    DOWNLOAD: "download",
+    DIRECT_DOWNLOAD: "direct_download"
 }
 
 

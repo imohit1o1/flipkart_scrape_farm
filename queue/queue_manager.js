@@ -2,23 +2,17 @@ import { ApiError, logger } from '../utils/index.js';
 import { SystemMonitorService } from '../services/system_monitor.service.js';
 import { ENTITY_PREFIXES, LOG_ACTIONS, queueTypes, STEP_NAMES, TASK_STATUS, SYSTEM_RESOURCE_CONFIG, DISPATCH_INTERVAL_MS } from '../constants.js';
 import { ReportService } from '../services/report.service.js';
+import os from 'os';
 
-// ===== STATE MANAGEMENT =====
+    // ===== STATE MANAGEMENT =====
 const state = {
     manualQueue: [],
     bulkQueue: [],
     inFlightJobs: new Map(),
     workerThreads: [],
+    browserCluster: null,
     resourceMonitor: null,
     isProcessing: false,
-
-    // Dynamic configuration
-    currentWorkerThreads: 4,
-    currentBatchSize: 16,
-    maxWorkerThreads: 8,
-    minWorkerThreads: 1,
-    maxBatchSize: 32,
-    minBatchSize: 1,
 
     // Configuration
     pollingInterval: 1000,
@@ -107,13 +101,7 @@ const QueueManager = {
                 requested_operations: jobData.requested_operations,
                 operation_steps: jobData.operation_steps || STEP_NAMES.REQUEST,
                 status: TASK_STATUS.ENQUEUED,
-                createdAt: new Date().toISOString(),
                 enqueued_at: new Date().toISOString(),
-                attempts: 0,
-                startedAt: null,
-                completedAt: null,
-                error: null,
-                result: null
             };
 
             if (queueType === queueTypes.MANUAL) {
@@ -295,16 +283,32 @@ const QueueManager = {
     // ===== WORKER THREAD OPERATIONS =====
 
     /**
-     * Initialize worker threads
+     * Initialize dynamic worker threads based on CPU load
      * @returns {Promise<void>}
      */
     initializeWorkerThreads: async () => {
-        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.SETUP} Initializing ${state.currentWorkerThreads} worker threads`);
-
-        // TODO: Implement worker thread initialization
-        // This will be implemented when we add worker thread support
-
-        logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.COMPLETED} Worker threads initialized`);
+        try {
+            const systemSnapshot = await SystemMonitorService.getSystemSnapshot();
+            const cpuCount = os.cpus().length;
+            
+            // Calculate optimal worker threads based on CPU load
+            const cpuLoad = systemSnapshot.cpu.current;
+            const availableCpu = Math.max(state.minWorkerThreads, 
+                Math.min(state.maxWorkerThreads, 
+                    Math.floor(cpuCount * (1 - cpuLoad / 100))));
+            
+            state.currentWorkerThreads = availableCpu;
+            state.currentBatchSize = await QueueManager.getOptimalBatchSize();
+            
+            logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.SETUP} Initializing ${availableCpu} worker threads based on CPU load: ${cpuLoad}%`);
+            logger.info(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.SETUP} Optimal batch size: ${state.currentBatchSize}`);
+            
+        } catch (error) {
+            logger.error(`${ENTITY_PREFIXES.QUEUE_MANAGER} ${LOG_ACTIONS.ERROR} Failed to initialize worker threads:`, error);
+            // Fallback to defaults
+            state.currentWorkerThreads = 4;
+            state.currentBatchSize = 16;
+        }
     },
 
     /**
